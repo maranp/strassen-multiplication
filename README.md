@@ -5,7 +5,7 @@ To run:
 ./strass
 
 Testing:
-running ./strass tests multiplication of matrices are various sizes
+running ./strass tests multiplication of matrices of various sizes
 and compares the output with the expected output to declare PASS or FAIL.
 
 Features:
@@ -21,6 +21,8 @@ Features:
 3. For lower sizes of matrix, multiplication is switched to traditional
    ijk multiplication as its not worth the overhead of blocked multiplication.
 
+   The configuration parameters for 2. and 3. can be set in config.h file.
+   
 Limitations:
 1. Only square matrices of size in the order of power of 2 are supported.
    Other sizes can be supported by the method of dynamic peeling, but a TODO.
