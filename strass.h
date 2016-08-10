@@ -14,13 +14,13 @@
 */
 #define ALIGN 64
 
-/* simple macro to access 1d buffer as 2d matrix elements */
+/* convenience macro to access 1d buffer as 2d matrix elements */
 #define MEM(a, n, i, j)  a[(i) * (n) + (j)]
 
 
 /* THE function that does the core work - strassen multiplication */
-ele_type * strass(const ele_type * A,
-	     const ele_type * B,
-	     ele_type * C, size_t size);
+void strassen_multiply(const ele_type * A,
+		       const ele_type * B,
+		       ele_type * C, size_t size);
 
 #endif // STRASS_H

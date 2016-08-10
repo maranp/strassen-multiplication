@@ -1,4 +1,4 @@
-CFLAGS=-Wall -Werror -Wextra -g -O3 -DNDEBUG -march=native
+CFLAGS=-Wextra -Wall -g -O3 -DNDEBUG -march=native
 strass : strass.c main.c util.c
 
 clean:

@@ -42,42 +42,19 @@ static void reorder(const ele_type * a, ele_type * b, size_t size) {
     for (j = 0; j < size; j++) {
       size_t I = X(i, j, n);
       size_t J = Y(i, j, n);
-      //printf("I: %d, J: %d\n", I, J);
-      assert(I >= 0 && I < size);
-      assert(J >= 0 && J < size);
+      assert(I < size);
+      assert(J < size);
       MEM(b, size, i, j) = MEM(a, size, I, J);
     }
   }
 
 }
 
-#ifndef NDEBUG
-static void print_2d(const char *s, const ele_type *a, size_t size) {
-  size_t i, j;
-  printf("print_2d: %s\n", s);
-  for (i = 0; i < size; i++) {
-    for (j = 0; j < size; j++) {
-      printf("%2d ", MEM(a, size, i, j));
-    }
-    printf("\n");
-  }
-}
-
-static void print_arr(const ele_type *a, size_t n) {
-  size_t i;
-  for(i = 0; i < n; i++) {
-    printf("%d ", a[i]);
-  }
-  printf("\n");
-}
-
-#endif
-
 /* it's not worth the overhead of blocked and strassen multiplication
    when the order of matrix is small. Do the traditional ijk multiplication */
-static ele_type * mult_ijk(const ele_type * a,
-			   const ele_type * b,
-			   ele_type * c, size_t size) {
+static void ijk_multiply(const ele_type * a,
+			 const ele_type * b,
+			 ele_type * c, size_t size) {
   size_t i, j, k;
   ele_type sum = 0;
   memset(c, 0, sizeof(ele_type) * size * size);
@@ -90,7 +67,6 @@ static ele_type * mult_ijk(const ele_type * a,
       MEM(c, size, i, j) = sum;
     }
   }
-  return c;
 }
 
 
@@ -98,13 +74,13 @@ static ele_type * mult_ijk(const ele_type * a,
    basically, a strip (of block size) of matrix A is multiplied
    with a block (of block size) of matrix B and resultant matrix's
    strip is updated at each iteration. This method helps to minimise cache
-   misses due colum wise access of matrix B in traditional ijk algorithm
-   the block size should be chosen such that the block of B can fit in the
-   cache (depends on cache configuration)
+   misses that could otherwise occur due to columnwise access of matrix B in
+   traditional ijk algorithm. The block size should be chosen such that the
+   block of B can fit in the cache (depends on cache configuration)
  */
-static ele_type * mult_block(const ele_type * a,
-	  const ele_type * b,
-	  ele_type * c, size_t size) {
+static void block_multiply(const ele_type * a,
+			   const ele_type * b,
+			   ele_type * c, size_t size) {
   size_t i, j, k;
   size_t j0, k0;
   ele_type sum = 0;
@@ -123,11 +99,10 @@ static ele_type * mult_block(const ele_type * a,
       }
     }
   }
-  return c;
 }
 
 static void set_quad(ele_type *M, const ele_type *m, size_t size,
-	      size_t rl1, size_t rl2, size_t cl1, size_t cl2) {
+		     size_t rl1, size_t rl2, size_t cl1, size_t cl2) {
   size_t i, j, cnt;
   assert(M && m);
 
@@ -141,10 +116,14 @@ static void set_quad(ele_type *M, const ele_type *m, size_t size,
   return;
 }
 
-static ele_type * add(const char *s, const ele_type *a, const ele_type *b, ele_type *r, size_t size) {
+/* r = a + b
+   where r, a, b are 1d vectors of length 'size' */
+static ele_type * add(const ele_type *a, const ele_type *b, ele_type *r, size_t size) {
   size_t i;
-  assert(r);
 
+  assert(a && b && r);
+
+  /* vectorization friendly. SIMD instructions are used at -O3 (or -ftree-vectorize) */
   for (i = 0; i < size * size; i++) {
     r[i] = a[i] + b[i];
   }
@@ -152,10 +131,14 @@ static ele_type * add(const char *s, const ele_type *a, const ele_type *b, ele_t
   return r;
 }
 
-static ele_type * minus(const char *s, const ele_type *a, const ele_type *b, ele_type *r, size_t size) {
+/* r = a - b
+   where r, a, b are 1D vectors of length 'size' */
+static ele_type * minus(const ele_type *a, const ele_type *b, ele_type *r, size_t size) {
   size_t i;
-  assert(r);
 
+  assert(a && b && r);
+
+  /* vectorization friendly. SIMD instructions are used at -O3 (or -ftree-vectorize) */
   for (i = 0; i < size * size; i++) {
     r[i] = a[i] - b[i];
   }
@@ -163,10 +146,23 @@ static ele_type * minus(const char *s, const ele_type *a, const ele_type *b, ele
   return r;
 }
 
-ele_type * strass(const ele_type * A,
-	    const ele_type * B,
-	    ele_type * C, size_t size) {
+/* strassen multiplication:
+   mat_c = mat_a * mat_b
+   where mat_a, mat_b and mat_c are square matrix of length size * size.
+   Quite a long function but covers the complete strassen method
+   in single function body */
+
+void strassen_multiply(const ele_type * mat_a,
+		       const ele_type * mat_b,
+		       ele_type * mat_c, size_t size) {
+  /* index variable */
   size_t i;
+
+  /* a, b, c, d,
+     e, f, g, h
+     r, s, t, u
+     are intermediate submatrices of length
+     (size / 2) * (size / 2). */
   ele_type *a = 0;
   ele_type *b = 0;
   ele_type *c = 0;
@@ -179,189 +175,193 @@ ele_type * strass(const ele_type * A,
   ele_type *s = 0;
   ele_type *t = 0;
   ele_type *u = 0;
-  ele_type *Aa[8] = {0};
-  ele_type *Bb[8] = {0};
+ 
+  /* Aterm saves the intermediate results of operations on mat_a's 4 quadrants */
+  ele_type *Aterm[8] = {0};
+
+  /* Aterm saves the intermediate results of operations on mat_a's 4 quadrants */
+  ele_type *Bterm[8] = {0};
+
+  /* Pterm saves the intermediate results of products Aterm and Bterm. */
+  /* The purpose of Aterm, Bterm and P will be more evident if one refers to 
+     strassen algorithm description.
+     (http://www.cs.mcgill.ca/~pnguyen/251F09/matrix-mult.pdf) */
   ele_type *P[8] = {0};;
 
+  /* temporary vectors */
   ele_type *t1 = 0;
   ele_type *t2 = 0;
-  ele_type *Atemp = 0;
-  ele_type *Btemp = 0;
+
+  /* temporaries to save reordered A and B matrices */
+  ele_type *A_reordered = 0;
+  ele_type *B_reordered = 0;
+
+  int rc; /* track the return value of library functions */
 
   if (size <= BLOCK_CUTOFF) {
-    return mult_ijk(A, B, C, size);;
+    return ijk_multiply(mat_a, mat_b, mat_c, size);;
   }
 
   if (size <= RECURSION_CUTOFF) {
-    return mult_block(A, B, C, size);;
+    return block_multiply(mat_a, mat_b, mat_c, size);;
   }
 
   /* all allocations */
-  /* 0th element of A, B, P unused */
+  /* 0th element of Aterm, Bterm, P unused */
   for (i = 1; i < 8; i++) {
-    posix_memalign((void **)&Aa[i], ALIGN, sizeof(ele_type) * size * size / 4);
-    assert(Aa[i] != NULL);
-    posix_memalign((void **)&Bb[i], ALIGN, sizeof(ele_type) * size * size / 4);
-    assert(Bb[i] != NULL);
-    posix_memalign((void **)&P[i], ALIGN, sizeof(ele_type) * size * size / 4);
-    assert(P[i] != NULL);
+    rc = posix_memalign((void **)&Aterm[i], ALIGN, sizeof(ele_type) * size * size / 4);
+    assert(rc == 0 && Aterm[i] != NULL);
+    rc = posix_memalign((void **)&Bterm[i], ALIGN, sizeof(ele_type) * size * size / 4);
+    assert(rc == 0 && Bterm[i] != NULL);
+    rc = posix_memalign((void **)&P[i], ALIGN, sizeof(ele_type) * size * size / 4);
+    assert(rc == 0 && P[i] != NULL);
   }
-  posix_memalign((void **)&t1, ALIGN, sizeof(ele_type) * size * size / 4);
-  assert(t1 != NULL);
-  posix_memalign((void **)&t2, ALIGN, sizeof(ele_type) * size * size / 4);
-  assert(t2 != NULL);
+  rc = posix_memalign((void **)&t1, ALIGN, sizeof(ele_type) * size * size / 4);
+  assert(rc == 0 && t1 != NULL);
+  rc = posix_memalign((void **)&t2, ALIGN, sizeof(ele_type) * size * size / 4);
+  assert(rc == 0 && t2 != NULL);
 
-  posix_memalign((void **)&r, ALIGN, sizeof(ele_type) * size * size / 4);
-  assert(r != NULL);
-  posix_memalign((void **)&s, ALIGN, sizeof(ele_type) * size * size / 4);
-  assert(s != NULL);
-  posix_memalign((void **)&t, ALIGN, sizeof(ele_type) * size * size / 4);
-  assert(t != NULL);
-  posix_memalign((void **)&u, ALIGN, sizeof(ele_type) * size * size / 4);
-  assert(u != NULL);
+  rc = posix_memalign((void **)&r, ALIGN, sizeof(ele_type) * size * size / 4);
+  assert(rc == 0 && r != NULL);
+  rc = posix_memalign((void **)&s, ALIGN, sizeof(ele_type) * size * size / 4);
+  assert(rc == 0 && s != NULL);
+  rc = posix_memalign((void **)&t, ALIGN, sizeof(ele_type) * size * size / 4);
+  assert(rc == 0 && t != NULL);
+  rc = posix_memalign((void **)&u, ALIGN, sizeof(ele_type) * size * size / 4);
+  assert(rc == 0 && u != NULL);
 
   /* reordered matrices to apply strassen operators */
-  posix_memalign((void **)&Atemp, ALIGN, sizeof(ele_type) * size * size);
-  assert(Atemp != NULL);
-  posix_memalign((void **)&Btemp, ALIGN, sizeof(ele_type) * size * size);
-  assert(Btemp != NULL);
+  rc = posix_memalign((void **)&A_reordered, ALIGN, sizeof(ele_type) * size * size);
+  assert(rc == 0 && A_reordered != NULL);
+  rc = posix_memalign((void **)&B_reordered, ALIGN, sizeof(ele_type) * size * size);
+  assert(rc == 0 && B_reordered != NULL);
 
-  reorder(A, Atemp, size);
-  reorder(B, Btemp, size);
+  reorder(mat_a, A_reordered, size);
+  reorder(mat_b, B_reordered, size);
 
-  a = Atemp + size * size * 0 / 4;
+  /* since mat_a is reordered. The submatrices (4 quadrants)
+     are now contiguous in memory. So, designating the submatrices is just pointing to
+     the coorect memory address where each quadrant starts.
+     mat_a = (a b)
+             (c d)
+  */
+  a = A_reordered + size * size * 0 / 4;
+  b = A_reordered + size * size * 1 / 4;
+  c = A_reordered + size * size * 2 / 4;
+  d = A_reordered + size * size * 3 / 4;
 
-  b = Atemp + size * size * 1 / 4;
+  /* Aterm[0] unused */
+  /* Aterm1 = a */
+  Aterm[1] = a;
 
-  c = Atemp + size * size * 2 / 4;
+  /* Aterm2 = a + b */
+  add(a, b, Aterm[2], size / 2);
 
-  d = Atemp + size * size * 3 / 4;
+  /* Aterm3 = c + d */
+  add(c, d, Aterm[3], size / 2);
 
-  // Aa[0] unused
-  /* A1 = a */
-  /* A2 = a + b */
-  /* A3 = c + d */
-  /* A4 = d */
-  /* A5 = a + d */
-  /* A6 = b - d */
-  /* A7 = a - c */
+  /* Aterm4 = d */
+  Aterm[4] = d;
 
-  Aa[1] = a;
-  add("a + b", a, b, Aa[2], size / 2);
-  add("c + d", c, d, Aa[3], size / 2);
+  /* Aterm5 = a + d */
+  add(a, d, Aterm[5], size / 2);
 
-  Aa[4] = d;
-  add("a + d", a, d, Aa[5], size / 2);
+  /* Aterm6 = b - d */
+  minus(b, d, Aterm[6], size / 2);
 
-  minus("b - d", b, d, Aa[6], size / 2);
+  /* Aterm7 = a - c */
+  minus(a, c, Aterm[7], size / 2);
 
-  minus("a - c", a, c, Aa[7], size / 2);
+  /* since mat_b is reordered. The submatrices (4 quadrants)
+     are now contiguous in memory. So, designating the submatrices is just pointing to
+     the coorect memory address where each quadrant starts.
+     mat_b = (e f)
+             (g h)
+  */
+  e = B_reordered + size * size * 0 / 4;
+  f = B_reordered + size * size * 1 / 4;
+  g = B_reordered + size * size * 2 / 4;
+  h = B_reordered + size * size * 3 / 4;
 
-  e = Btemp + size * size * 0 / 4;
-  f = Btemp + size * size * 1 / 4;
-  g = Btemp + size * size * 2 / 4;
-  h = Btemp + size * size * 3 / 4;
+  // Bterm[0] unused
+  /* Bterm1 = f - h */
+  minus(f, h, Bterm[1], size / 2);
 
-  // Bb[0] unused
-  /* B1 = f - h */
-  /* B2 = h */
-  /* B3 = e */
-  /* B4 = g - e */
-  /* B5 = e + h */
-  /* B6 = g + h */
-  /* B7 = e + f */
-  minus("f - h", f, h, Bb[1], size / 2);
-  Bb[2] = h;
-  Bb[3] = e;
+  /* Bterm2 = h */
+  /* Bterm3 = e */
+  Bterm[2] = h;
+  Bterm[3] = e;
 
-  minus("g - e", g, e, Bb[4], size / 2);
+  /* Bterm4 = g - e */
+  minus(g, e, Bterm[4], size / 2);
 
-  add("e + h", e, h, Bb[5], size / 2);
+  /* Bterm5 = e + h */
+  add(e, h, Bterm[5], size / 2);
 
-  add("g + h", g, h, Bb[6], size / 2);
+  /* Bterm6 = g + h */
+  add(g, h, Bterm[6], size / 2);
 
-  add("e + f", e, f, Bb[7], size / 2);
+  /* Bterm7 = e + f */
+  add(e, f, Bterm[7], size / 2);
 
   // P[0] unused
   for (i = 1; i <= 7; i++)  {
-    strass(Aa[i], Bb[i], P[i], size / 2);
-#ifndef NDEBUG
-    printf("P[%d]: ", i); 
-    print_arr(P[i], size * size / 4);
-#endif
+    /* P[i] = Aterm[i] * Bterm[i] */
+    strassen_multiply(Aterm[i], Bterm[i], P[i], size / 2);
   }
 
-  /* r = P5 + P4 - P2 + P6; */
-  /* s = P1 + P2; */
-  /* t = P3 + P4; */
-  /* u = P5 + P1 - P3 - P7; */
-
-  add("p5 + p4", P[5], P[4], t1, size / 2);
-
-  minus("t1 - p[2]", t1, P[2], t2, size / 2);
-
-  add("t2 + p6", t2, P[6], r, size / 2);
+  /* The resultant matrix's quadrants are
+     (r s)
+     (t u) which are evaluated as follows. */
   
-  add("p1 + p2", P[1], P[2], s, size / 2);
+  /* r = P5 + P4 - P2 + P6
+     which is evaluated with temporaries as
+     t1 = P5 + P4
+     t2 = t1 - P2
+     r = t2 + P6
+  */
+  add(P[5], P[4], t1, size / 2);
+  minus(t1, P[2], t2, size / 2);
+  add(t2, P[6], r, size / 2);
+  
+  /* s = P1 + P2; */
+  add(P[1], P[2], s, size / 2);
 
-  add("p3 + p4", P[3], P[4], t, size / 2);
+  /* t = P3 + P4; */
+  add(P[3], P[4], t, size / 2);
 
-  add("p5 + p1", P[5], P[1], t1, size / 2);
+  /* u = P5 + P1 - P3 - P7
+     which is evaluated with temporaries as
+     t1 = P5 + P1
+     t2 = t1 - P3
+     u = t2 - P7
+  */
+  add(P[5], P[1], t1, size / 2);
+  minus(t1, P[3], t2, size / 2);
+  minus(t2, P[7], u, size / 2);
 
-  minus("t1 - p3", t1, P[3], t2, size / 2);
-
-  minus("t2 - p7", t2, P[7], u, size / 2);
-
-#ifndef NDEBUG
-  printf("result:\n");
-  printf("r:\n");
-  for(i = 0; i < size * size / 4; i++) {
-    printf("%d ", r[i]);
-  }
-  printf("\n");
-
-  printf("s:\n");
-  for(i = 0; i < size * size / 4; i++) {
-    printf("%d ", s[i]);
-  }
-  printf("\n");
-
-  printf("t:\n");
-  for(i = 0; i < size * size / 4; i++) {
-    printf("%d ", t[i]);
-  }
-  printf("\n");
-
-  printf("u:\n");
-  for(i = 0; i < size * size / 4; i++) {
-    printf("%d ", u[i]);
-  }
-  printf("\n");
-#endif
-
-  /* merge r s t u */
-  set_quad(C, r, size, 0, size / 2, 0, size / 2);
-  set_quad(C, s, size, 0, size / 2, size / 2, size);
-  set_quad(C, t, size, size / 2, size, 0, size / 2);
-  set_quad(C, u, size, size / 2, size, size / 2, size);
+  /* merge r s t u into the resultant matrix mat_c.
+     That is, mat_c = (r s)
+                      (t u) */
+  set_quad(mat_c, r, size, 0, size / 2, 0, size / 2);
+  set_quad(mat_c, s, size, 0, size / 2, size / 2, size);
+  set_quad(mat_c, t, size, size / 2, size, 0, size / 2);
+  set_quad(mat_c, u, size, size / 2, size, size / 2, size);
 
   /* all frees */
   for (i = 0; i < 8; i++) {
     if (i != 1 && i != 4)
-      free(Aa[i]);
+      free(Aterm[i]);
     if (i != 2 && i != 3)
-      free(Bb[i]);
+      free(Bterm[i]);
     free(P[i]);
   }
   free(t1);
   free(t2);
-  free(Atemp);
-  free(Btemp);
+  free(A_reordered);
+  free(B_reordered);
   free(r);
   free(s);
   free(t);
   free(u);
-
-
-  return C;
 }

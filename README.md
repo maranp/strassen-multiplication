@@ -21,7 +21,8 @@ Features:
 3. For lower sizes of matrix, multiplication is switched to traditional
    ijk multiplication as its not worth the overhead of blocked multiplication.
 
-   The configuration parameters for 2. and 3. can be set in config.h file.
+   The configuration parameters for 2. and 3. can be set in config.h file. The type of
+   the matrix elements can also be set in config.h.
    
 Limitations:
 1. Only square matrices of size in the order of power of 2 are supported.

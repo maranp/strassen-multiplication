@@ -78,7 +78,7 @@ int test(size_t n) {
   unit_matrix(unit, n);
   random_matrix(rand, n);
 
-  strass(rand, unit, result, n);
+  strassen_multiply(rand, unit, result, n);
 
   printf("resultant matrix:\n");
   rc = memcmp(rand, result, n * n * sizeof(ele_type));
@@ -170,7 +170,7 @@ void sample_matrix_test() {
 
   //mult(a, b, c, 4);
   //memset(c, 0, N * N * sizeof(ele_type));
-  strass(a, b, c, N);
+  strassen_multiply(a, b, c, N);
 
   printf("resultant matrix:\n");
   for (i = 0; i < N; i++) {
