@@ -146,6 +146,14 @@ static ele_type * minus(const ele_type *a, const ele_type *b, ele_type *r, size_
   return r;
 }
 
+static void * strassen_multiply_wrapper(void *arg) {
+  strassen_params_t *params = arg;
+  strassen_multiply(params->aterm, params->bterm, params->pterm, params->size);
+
+  return NULL;
+}
+
+
 /* strassen multiplication:
    mat_c = mat_a * mat_b
    where mat_a, mat_b and mat_c are square matrix of length size * size.
@@ -157,7 +165,6 @@ void strassen_multiply(const ele_type * mat_a,
 		       ele_type * mat_c, size_t size) {
   /* index variable */
   size_t i;
-
   /* a, b, c, d,
      e, f, g, h
      r, s, t, u
@@ -305,9 +312,24 @@ void strassen_multiply(const ele_type * mat_a,
   add(e, f, Bterm[7], size / 2);
 
   // P[0] unused
+  pthread_t thread[8];
+  strassen_params_t *strassen_params[8];
   for (i = 1; i <= 7; i++)  {
     /* P[i] = Aterm[i] * Bterm[i] */
-    strassen_multiply(Aterm[i], Bterm[i], P[i], size / 2);
+    // strassen_multiply(Aterm[i], Bterm[i], P[i], size / 2);
+    strassen_params[i] = malloc(sizeof(strassen_params_t));
+    strassen_params[i]->aterm = Aterm[i];
+    strassen_params[i]->bterm = Bterm[i];
+    strassen_params[i]->pterm = P[i];
+    strassen_params[i]->size = size / 2;
+
+    pthread_create(&thread[i], NULL, strassen_multiply_wrapper, strassen_params[i]);
+  }
+
+  void *res;
+  for (i = 1; i <= 7; i++)  {
+    pthread_join(thread[i], &res);
+    free(strassen_params[i]);
   }
 
   /* The resultant matrix's quadrants are

@@ -5,6 +5,7 @@
 #include <malloc.h>
 #include <string.h>
 #include <assert.h>
+#include <pthread.h>
 #include "config.h"
 
 /* temporary buffer for matrices are allocated with posix_memalign.
@@ -17,10 +18,17 @@
 /* convenience macro to access 1d buffer as 2d matrix elements */
 #define MEM(a, n, i, j)  a[(i) * (n) + (j)]
 
+typedef struct {
+  ele_type *aterm;
+  ele_type *bterm;
+  ele_type *pterm;
+  size_t size;
+} strassen_params_t;
 
 /* THE function that does the core work - strassen multiplication */
 void strassen_multiply(const ele_type * A,
 		       const ele_type * B,
 		       ele_type * C, size_t size);
+
 
 #endif // STRASS_H

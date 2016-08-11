@@ -56,11 +56,11 @@ int main() {
     printf("test(1024) passed\n");
   }
 
-  if(!test(2048)) {
-    printf("test(2048) failed\n");
-  } else {
-    printf("test(2048) passed\n");
-  }
+  /* if(!test(2048)) { */
+  /*   printf("test(2048) failed\n"); */
+  /* } else { */
+  /*   printf("test(2048) passed\n"); */
+  /* } */
 
   return 0;
 }
